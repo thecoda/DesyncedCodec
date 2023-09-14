@@ -16,6 +16,7 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
   import codecLogging.{given, *}
 
   def intPacked: Codec[Long] = "intPacked" |> PackedIntCodec
+  def luaNextOffset: Codec[Long] = "luaNextOffset" |> PackedIntCodec
 
   //fast, thanks to intrinsics
   private def log2(bits: Int) : Int =
@@ -24,9 +25,15 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
   case class MapRow(value: DesyncedData, key: DPrimitive, isArr: Boolean)
 
   private val keyedMapRow: Codec[MapRow] =
-    "mapRow" |> (DesyncedDataCodec :: DesyncedPrimitiveCodec :: intPacked).xmap(
+    "keyedMapRow" |> (DesyncedDataCodec :: DesyncedPrimitiveCodec :: luaNextOffset).xmap(
       (v, k, _) => MapRow(v, k, isArr = false),
       entry => (entry.value, entry.key, 0) //TODO: calculate what this packed int should be
+    )
+
+  private def numberedMapRow(idx: Long): Codec[MapRow] =
+    "numberedMapRow" |> DesyncedDataCodec.xmap(
+      data => MapRow(data, DUInt32(idx), isArr = true),
+      row => row.value
     )
 
   def multipleMapRows(arraySize: Long, mapSize: Long) = new Codec[Vector[MapRow]] {
@@ -47,10 +54,11 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
     ): Either[Err, (Vector[MapRow], BitVector)] = {
       if arrayRemaining == 0 then {
         log.atom(s"array entries done")
+        log.atom("bits: " + bits.toHex.grouped(2).mkString(" "))
         recurseMap(bits, vacancyBits, mapRemaining, maskBit, acc)
       } else {
         log.atom(s"--- array $arrayIdx [$arrayRemaining + $mapRemaining remain], maskBit = $maskBit ---")
-        log.atom("bits: " + bits.toHex.grouped(2).mkString(" "))
+//        log.atom("bits: " + bits.toHex.grouped(2).mkString(" "))
         if maskBit > 7 then {
           val vac = bits.take(8)
           recurseArray(bits.drop(8), vac, arrayRemaining, mapRemaining, arrayIdx, 0, acc)
@@ -58,10 +66,10 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
           log.atom(s"VACANT")
           recurseArray(bits, vacancyBits, arrayRemaining - 1, mapRemaining, arrayIdx + 1, maskBit + 1, acc)
         } else {
-          DesyncedDataCodec.decode(bits) match {
+          numberedMapRow(arrayIdx).decode(bits) match {
             case Successful(dr) =>
               log.atom(s"array entry: $dr")
-              val newEntry = MapRow(dr.value, DUInt32(arrayIdx), isArr = true)
+              val newEntry = dr.value
               recurseArray(
                 dr.remainder,
                 vacancyBits,
@@ -90,7 +98,7 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
         Right(acc.reverse.toVector, bits)
       } else {
         log.atom(s"--- map [$mapRemaining remain], maskBit = $maskBit ---")
-        log.atom("bits: " + bits.toHex.grouped(2).mkString(" "))
+//        log.atom("bits: " + bits.toHex.grouped(2).mkString(" "))
         if maskBit > 7 then {
           val vac = bits.take(8)
           recurseMap(bits.drop(8), vac, mapRemaining, 0, acc)
@@ -100,7 +108,7 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
         } else {
           keyedMapRow.decode(bits) match {
             case Successful(dr) =>
-              log.atom("remainder: " + dr.remainder.toHex.grouped(2).mkString(" "))
+//              log.atom("remainder: " + dr.remainder.toHex.grouped(2).mkString(" "))
               recurseMap(dr.remainder, vacancyBits, mapRemaining - 1, maskBit + 1, dr.value :: acc)
             case Failure(err) => Left(err)
           }
@@ -128,7 +136,7 @@ object DesyncedTableCodec extends Codec[DesyncedData] {
       val mapPart = fixMap.m.toVector.map { case (k, v) => MapRow(v, k, isArr = false) }
       arrPart ++ mapPart
 
-    s"dtableData data($arraySize, $mapSize)" |>
+    s"dtableData data(arr=$arraySize, map=$mapSize)" |>
       multipleMapRows(arraySize, mapSize).xmap(entriesToMap, mapToEntries)
   }
 

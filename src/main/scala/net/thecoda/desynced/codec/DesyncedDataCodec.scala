@@ -14,7 +14,7 @@ object DesyncedDataCodec extends Codec[DesyncedData] {
   val dUserData: Codec[DUserData] = constant(hex"c1") ~> provide(DUserData(ByteVector.empty))
 
   private val codec: Codec[DesyncedData] =
-    scodec.codecs.lazily {
+    lazily {
       choice(
         dUserData.upcast,
         DesyncedPrimitiveCodec.upcast,

@@ -30,11 +30,11 @@ object DesyncedPrimitiveCodec extends Codec[DPrimitive] {
   val duint8: Codec[DUInt8] =
     (constant(hex"cc") :: uint8).dropUnits.as[DUInt8]
   val duint16: Codec[DUInt16] =
-    (constant(hex"cd") :: uint16).dropUnits.as[DUInt16]
+    (constant(hex"cd") :: uint16L).dropUnits.as[DUInt16]
   val duint32: Codec[DUInt32] =
-    (constant(hex"ce") :: uint32).dropUnits.as[DUInt32]
+    (constant(hex"ce") :: uint32L).dropUnits.as[DUInt32]
   val duint64: Codec[DUInt64] =
-    (constant(hex"cf") :: long(64)).dropUnits.as[DUInt64]
+    (constant(hex"cf") :: longL(64)).dropUnits.as[DUInt64]
 
   val dint8: Codec[DInt8] =
     (constant(hex"d0") :: int8).dropUnits.as[DInt8]
@@ -45,14 +45,32 @@ object DesyncedPrimitiveCodec extends Codec[DPrimitive] {
   val dint64: Codec[DInt64] =
     (constant(hex"d3") :: int64).dropUnits.as[DInt64]
 
-  val dfixStr: Codec[DFixString] =
-    (constant(bin"101") :: variableSizeBytes(uint(5), utf8)).dropUnits.as[DFixString]
-  val dstr8: Codec[DString8] =
-    (constant(hex"d9") :: variableSizeBytes(uint8, utf8)).dropUnits.as[DString8]
-  val dstr16: Codec[DString16] =
-    (constant(hex"da") :: variableSizeBytes(uint16, utf8)).dropUnits.as[DString16]
-  val dstr32: Codec[DString32] =
-    (constant(hex"db") :: variableSizeBytesLong(uint32, utf8)).dropUnits.as[DString32]
+  val dfixStr: Codec[DString] =
+    (constant(bin"101") :: variableSizeBytes(uint(5), utf8)).dropUnits.as[DString]
+  val dstr8: Codec[DString] =
+    (constant(hex"d9") :: variableSizeBytes(uint8, utf8)).dropUnits.as[DString]
+  val dstr16: Codec[DString] =
+    (constant(hex"da") :: variableSizeBytes(uint16L, utf8)).dropUnits.as[DString]
+  val dstr32: Codec[DString] =
+    (constant(hex"db") :: variableSizeBytesLong(uint32L, utf8)).dropUnits.as[DString]
+
+  object dStr extends Codec[DString] {
+    override def decode(bits: BitVector): Attempt[DecodeResult[DString]] = {
+      println(s"=== dStr Decoder on ${bits.toByteVector.take(1).toHex} ===")
+      val ret = Decoder.choiceDecoder(
+        dfixStr,
+        dstr8,
+        dstr16,
+        dstr32
+      ).decode(bits)
+      println(s"=== dStr Decoder ret $ret ===")
+      ret
+    }
+
+    override def encode(value: DString): Attempt[BitVector] = ???
+    override def sizeBound: SizeBound = SizeBound(16, None)
+
+  }
 
   val dpositiveFixInt: Codec[DPositiveFixInt] =
     (constant(bin"0") :: uint(7)).dropUnits.as[DPositiveFixInt]
@@ -80,10 +98,7 @@ object DesyncedPrimitiveCodec extends Codec[DPrimitive] {
         dint16.upcast,
         dint32.upcast,
         dint64.upcast,
-        dfixStr.upcast,
-        dstr8.upcast,
-        dstr16.upcast,
-        dstr32.upcast,
+        dStr.upcast,
       )
     }
 
